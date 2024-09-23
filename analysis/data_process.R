@@ -156,7 +156,6 @@ data_processed <-
         filter(cov_bin_long_covid == FALSE)
   )
 
-# why is date of death before baseline date and this person is marked qa_bin_was_alive == TRUE? dummy data?
 # why are some periods (at the end) NA? Double-check!
 # data_processed$grace7 %>%
 #   select(patient_id, baseline_date, period_week, period_month, period_2month, period_3month, status_primary, fu_primary, qa_date_of_death, qa_bin_was_alive) %>%
