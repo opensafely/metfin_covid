@@ -16,7 +16,7 @@ from ehrql import (
 from ehrql.tables.beta.tpp import (
     addresses,
     clinical_events,
-    hospital_admissions,
+    hospital_admissions, ## does not exist anymore? -> apcs?
     medications,
     patients,
     practice_registrations,
@@ -307,7 +307,7 @@ def cause_of_death_matches(codelist):
 # INITIALISE the dataset, define the baseline date and event, and set the dummy dataset size
 #######################################################################################
 dataset = create_dataset()
-dataset.configure_dummy_data(population_size=100)
+dataset.configure_dummy_data(population_size=1000)
 dataset.baseline_date = baseline_date
 dataset.define_population(patients.exists_for_patient())
 
@@ -320,7 +320,8 @@ dataset.cov_bin_pos_covid = tmp_covid19_primary_care_events | tmp_covid19_sgss_e
 # population variables for dataset definition 
 dataset.qa_bin_is_female_or_male = patients.sex.is_in(["female", "male"]) 
 dataset.qa_bin_was_adult = (patients.age_on(baseline_date) >= 18) & (patients.age_on(baseline_date) <= 110) 
-dataset.qa_bin_was_alive = (patients.date_of_death.is_after(baseline_date) | patients.date_of_death.is_null()) 
+dataset.qa_bin_was_alive = (((patients.date_of_death.is_null()) | (patients.date_of_death.is_after(baseline_date))) & 
+        ((ons_deaths.date.is_null()) | (ons_deaths.date.is_after(baseline_date))))
 dataset.qa_bin_known_imd = addresses.for_patient_on(baseline_date).exists_for_patient() # known deprivation
 dataset.qa_bin_was_registered = practice_registrations.spanning(baseline_date - days(366), baseline_date).exists_for_patient() # only include if registered on baseline date spanning back 1 year. Calculated from 1 year = 365.25 days, taking into account leap years.
 # double-check line above against code from Will, line 98: https://github.com/opensafely/comparative-booster-spring2023/blob/main/analysis/dataset_definition.py 
@@ -690,7 +691,11 @@ dataset.cov_cat_smoking_status = cov_cat_smoking_status
 care_home_code = has_prior_event_snomed(carehome)
 #dataset.care_home_code = care_home_code
 # Flag care home based on TPP
-care_home_tpp = addresses.for_patient_on(baseline_date).care_home_is_potential_match 
+care_home_tpp=(
+            addresses.for_patient_on(baseline_date).care_home_is_potential_match |
+            addresses.for_patient_on(baseline_date).care_home_requires_nursing |
+            addresses.for_patient_on(baseline_date).care_home_does_not_require_nursing
+        ),
 #dataset.care_home_tpp = care_home_tpp
 dataset.cov_bin_carehome_status = case(
     when(care_home_code).then(True),
@@ -948,7 +953,7 @@ dataset.tmp_cov_num_hdl_cholesterol = recent_value_2y_snomed(hdl_cholesterol_sno
 ## Healthcare worker at the time they received a COVID-19 vaccination
 dataset.cov_bin_healthcare_worker = (
     occupation_on_covid_vaccine_record.where(
-        occupation_on_covid_vaccine_record.is_healthcare_worker.is_not_null())
+        occupation_on_covid_vaccine_record.is_healthcare_worker == True)
         .exists_for_patient()
 )
 
@@ -1072,9 +1077,7 @@ dataset.out_date_viral_fatigue_first = (
 )
 
 ## Death
-# all-cause death ## death table: I need to search in all cause of death or only underlying_cause_of_death ?
 # dataset.out_death_date = ons_deaths.date # already defined as QA
-
 # covid-related death (stated anywhere on any of the 15 death certificate options) # https://github.com/opensafely/comparative-booster-spring2023/blob/main/analysis/codelists.py uses a different codelist: codelists/opensafely-covid-identification.csv
 tmp_out_bin_death_cause_covid = cause_of_death_matches(covid_codes_incl_clin_diag)
 # add default F

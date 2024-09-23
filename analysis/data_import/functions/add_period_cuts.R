@@ -10,7 +10,7 @@
 
 add_period_cuts <- function(data_extracted, study_dates){
   seq_dates_start_interval_week <-
-    seq(study_dates$studystart_date, study_dates$studyend_date + 1, by = "1 week") # adding 1 to the end date ensures that the end date is included in the sequence
+    seq(study_dates$studystart_date, study_dates$studyend_date + 1, by = "1 week") # adding +1 to the end date ensures that the end date is included in the sequence
   seq_dates_start_interval_month <-
     seq(study_dates$studystart_date, study_dates$studyend_date + 1, by = "1 month")
   seq_dates_start_interval_2month <-

@@ -201,7 +201,7 @@ process_data <- function(data_extracted, study_dates, treat_window_days = 6){ # 
         TRUE ~ NA_character_),
 
       # Remove implausible consultation rates to 365 max (average of one per day) / this variable is derived from count_for_patient() so does not contain any missing (only 0s).
-      cov_num_consultation_rate = replace(cov_num_consultation_rate, cov_num_consultation_rate > 365, 365),
+      # cov_num_consultation_rate = replace(cov_num_consultation_rate, cov_num_consultation_rate > 365, 365),
 
       # TC/HDL ratio values: remove biologically implausible values: https://doi.org/10.1093/ije/dyz099
       ## remove TC < 1.75 or > 20
@@ -276,7 +276,7 @@ process_data <- function(data_extracted, study_dates, treat_window_days = 6){ # 
     # add_allcause_hosp_diagnosis() %>%
 
     mutate(
-      # Outcome prep --> outcomes are added in add_*_outcome() functions below
+      # Outcome prep --> outcomes are added in add_status_and_fu_primary() functions below
       # make distinction between noncovid death and covid death, since noncovid
       # death is a censoring event and covid death is an outcome
       study_window = baseline_date + days(28),
@@ -361,6 +361,7 @@ process_data <- function(data_extracted, study_dates, treat_window_days = 6){ # 
     # ) %>%
 
     add_period_cuts(study_dates = study_dates) %>%
+
   # drop unnecessary helper variables during the data processing (esp. above during diabetes algo)
     select(-contains("tmp"), -contains("step"))
 }

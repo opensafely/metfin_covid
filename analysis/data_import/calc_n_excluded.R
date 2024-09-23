@@ -89,7 +89,8 @@ calc_n_excluded <- function(data_processed){
     filter(cov_bin_ckd_45 == FALSE) %>%
     filter(cov_bin_liver_cirrhosis == FALSE) %>%
     filter(cov_bin_metfin_interaction == FALSE) %>%
-    filter(cov_bin_long_covid == FALSE)
+    filter(cov_bin_long_covid == FALSE) %>%
+    nrow()
 
   out <- tibble(n_before_exclusion_processing,
                 # completeness criteria

@@ -47,10 +47,10 @@ input_filename <- "dataset.arrow"
 data_extracted <- extract_data(input_filename)
 
 ## dummy data issues?
-# data_extracted <- data_extracted %>% # why are all the deaths only covid? Why no noncovid deaths?
+# data_extracted %>% # why are all the deaths only covid? Why no noncovid deaths?
 #   select(qa_date_of_death, out_bin_death_cause_covid) %>%
 #   View()
-# table(data_extracted$cov_cat_region) # why are there no dereg dates available?
+# table(data_extracted$out_date_dereg) # why are there no dereg dates available?
 
 # # change data if run using dummy data
 # if(Sys.getenv("OPENSAFELY_BACKEND") %in% c("", "expectations")){
@@ -90,7 +90,7 @@ names(data_processed) <- c("grace7", "grace8", "grace9", "grace10")
 # unique(data_processed_g7$out_date_noncovid_death) # no noncovid deaths
 # unique(data_processed_g7$out_date_covid_death)
 
-# data_processed_g7 %>% # why so many date of deaths before baseline dates and marked qa_bin_was_alive == TRUE? dummy data?
+# data_processed_g7 %>% # why do some have a date of death before baseline dates and marked qa_bin_was_alive == TRUE? dummy data?
 #   select(patient_id, baseline_date, period_week, period_month, period_2month, period_3month, status_primary, fu_primary, qa_date_of_death, qa_bin_was_alive) %>%
 #   View()
 
@@ -115,6 +115,7 @@ names(data_processed) <- c("grace7", "grace8", "grace9", "grace10")
 # 3 Apply quality assurance criteria
 ################################################################################
 n_qa_excluded <- quality_assurance(data_processed$grace7)
+
 data_processed <-
   map(.x = data_processed,
       .f = ~ .x %>%
@@ -131,6 +132,7 @@ data_processed <-
 # 4 Apply eligibility criteria
 ################################################################################
 n_excluded <- calc_n_excluded(data_processed$grace7)
+
 data_processed <-
   map(.x = data_processed,
       .f = ~ .x %>%

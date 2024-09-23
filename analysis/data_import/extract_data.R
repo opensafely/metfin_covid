@@ -1,6 +1,5 @@
 ################################################################################
-# A custom made function to process the extracted data incl. diabetes algorithm
-# Based on and Credits to https://github.com/opensafely/post-covid-diabetes/tree/main
+# A custom made function to extract the data from a feather file
 ################################################################################
 extract_data <- function(input_filename) {
   data_extract <- arrow::read_feather(here::here("output", input_filename))
