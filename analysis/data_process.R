@@ -116,6 +116,15 @@ names(data_processed) <- c("grace7", "grace8", "grace9", "grace10")
 ################################################################################
 n_qa_excluded <- quality_assurance(data_processed$grace7)
 
+data_processed_g7 <- data_processed_g7 %>%
+  filter(!is.na(qa_num_birth_year)) %>%
+  filter(is.na(qa_date_of_death) | (qa_num_birth_year <= year(qa_date_of_death))) %>%
+  filter(qa_num_birth_year >= 1793 & qa_num_birth_year <= year(Sys.Date())) %>%
+  filter((qa_date_of_death > as.Date("1900-01-01")) | (qa_date_of_death < Sys.Date()) | is.na(qa_date_of_death)) %>%
+  filter((cov_cat_sex == "Female" | is.na(cov_cat_sex)) | (cov_cat_sex == "Male" & (qa_bin_pregnancy == FALSE))) %>% # FALSE includes missing in a ehrQL logical
+  filter((cov_cat_sex == "Female" | is.na(cov_cat_sex)) | (cov_cat_sex == "Male" & (qa_bin_hrt == FALSE)) | (cov_cat_sex == "Male" & (qa_bin_cocp == FALSE))) %>%
+  filter((cov_cat_sex == "Male" | is.na(cov_cat_sex)) | (cov_cat_sex == "Female" & (qa_bin_prostate_cancer == FALSE)))
+
 data_processed <-
   map(.x = data_processed,
       .f = ~ .x %>%
@@ -132,6 +141,26 @@ data_processed <-
 # 4 Apply eligibility criteria
 ################################################################################
 n_excluded <- calc_n_excluded(data_processed$grace7)
+
+data_processed_g7 <- data_processed_g7 %>%
+  # completeness criteria
+  filter(qa_bin_was_alive == TRUE & (qa_date_of_death > baseline_date | is.na(qa_date_of_death))) %>% # additional condition since "qa_bin_was_alive == TRUE" may not cover all (e.g. pos test came out after death)
+  filter(qa_bin_is_female_or_male == TRUE) %>%
+  filter(qa_bin_known_imd == TRUE) %>%
+  filter(!is.na(cov_cat_region)) %>%
+  filter(qa_bin_was_registered == TRUE) %>%
+  # inclusion criteria
+  filter(qa_bin_was_adult == TRUE) %>%
+  filter(cov_bin_t2dm == TRUE) %>%
+  filter(!is.na(baseline_date)) %>%
+  # exclusion criteria
+  filter(cov_bin_hosp_baseline == FALSE) %>% # FALSE includes missing in a ehrQL logical
+  filter(cov_bin_metfin_before_baseline == FALSE) %>%
+  filter(cov_bin_metfin_allergy == FALSE) %>%
+  filter(cov_bin_ckd_45 == FALSE) %>%
+  filter(cov_bin_liver_cirrhosis == FALSE) %>%
+  filter(cov_bin_metfin_interaction == FALSE) %>%
+  filter(cov_bin_long_covid == FALSE)
 
 data_processed <-
   map(.x = data_processed,
