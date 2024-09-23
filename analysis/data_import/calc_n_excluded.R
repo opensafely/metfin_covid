@@ -83,7 +83,7 @@ calc_n_excluded <- function(data_processed){
     filter(cov_bin_t2dm == TRUE) %>%
     filter(!is.na(baseline_date)) %>%
     # exclusion criteria
-    filter(cov_bin_hosp_baseline == FALSE) %>% # FALSE includes missing in a ehrQL logical
+    filter(cov_bin_hosp_baseline == FALSE) %>% # FALSE includes missing in an ehrQL logical boolean
     filter(cov_bin_metfin_before_baseline == FALSE) %>%
     filter(cov_bin_metfin_allergy == FALSE) %>%
     filter(cov_bin_ckd_45 == FALSE) %>%
