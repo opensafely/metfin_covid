@@ -689,20 +689,18 @@ dataset.cov_cat_smoking_status = cov_cat_smoking_status
 ## Care home resident at baseline
 # Flag care home based on primis (patients in long-stay nursing and residential care)
 care_home_code = has_prior_event_snomed(carehome)
-#dataset.care_home_code = care_home_code
 # Flag care home based on TPP
-care_home_tpp=(
-            addresses.for_patient_on(baseline_date).care_home_is_potential_match |
-            addresses.for_patient_on(baseline_date).care_home_requires_nursing |
-            addresses.for_patient_on(baseline_date).care_home_does_not_require_nursing
-        ),
-#dataset.care_home_tpp = care_home_tpp
+care_home_tpp1 = addresses.for_patient_on(baseline_date).care_home_is_potential_match
+care_home_tpp2 = addresses.for_patient_on(baseline_date).care_home_requires_nursing
+care_home_tpp3 = addresses.for_patient_on(baseline_date).care_home_does_not_require_nursing
+# combine
 dataset.cov_bin_carehome_status = case(
     when(care_home_code).then(True),
-    when(care_home_tpp).then(True),
+    when(care_home_tpp1).then(True),
+    when(care_home_tpp2).then(True),
+    when(care_home_tpp3).then(True),
     default=False
 )
-
 
 ## Obesity, on or before baseline
 # Primary care
