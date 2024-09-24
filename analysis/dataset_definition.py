@@ -17,6 +17,7 @@ from ehrql.tables.tpp import (
     addresses,
     clinical_events,
     apcs,
+    opa_diag,
     medications,
     patients,
     practice_registrations,
@@ -29,19 +30,16 @@ from ehrql.tables.tpp import (
     emergency_care_attendances
 )
 
-from databuilder.codes import CTV3Code, ICD10Code # for BMI variable (among others)
+#from databuilder.codes import CTV3Code, ICD10Code # for BMI variable (among others)
 # from ehrql.codes import CTV3Code, ICD10Code # see line above
-from ehrql.tables.beta import tpp as schema # for BMI variable (among others) .beta or without .beta?
+#from ehrql.tables.beta import tpp as schema # for BMI variable (among others) .beta or without .beta?
 # from ehrql.tables import tpp as schema # see line above
-
-import operator
-from functools import reduce # for function building, e.g. any_of
 
 ## from codelists.py
 from codelists import *
 
 ## datetime function
-from datetime import date ## needed?
+#from datetime import date ## needed?
 
 ## to import json files (for the dates)
 import json
@@ -50,7 +48,7 @@ from pathlib import Path
 ## helper function
 import study_definition_helper_functions as helpers
 
-import numpy as np # random seed
+import numpy as np # for random seed
 np.random.seed(1928374) # random seed
 
 
