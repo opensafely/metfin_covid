@@ -21,10 +21,11 @@ library('dplyr')
 library('tidyr')
 library('purrr')
 ## Import custom user functions
-source(here::here("analysis", "data_import", "extract_data.R"))
 source(here::here("analysis", "data_import", "process_data.R"))
-source(here::here("analysis", "data_import", "calc_n_excluded.R"))
+source(here::here("analysis", "data_import", "extract_data.R"))
 source(here::here("analysis", "data_import", "quality_assurance.R"))
+source(here::here("analysis", "data_import", "calc_n_excluded.R"))
+source(here::here("analysis", "data_import", "calc_n_treated.R"))
 
 ################################################################################
 # 0.1 Create directories for output
@@ -78,19 +79,19 @@ data_extracted <- extract_data(input_filename)
 ################################################################################
 # 2 Process data
 ################################################################################
-data_processed_g7 <- process_data(data_extracted, study_dates, treat_window_days = 6) # grace period 7 dataset only
+data_processed_g10 <- process_data(data_extracted, study_dates, treat_window_days = 9) # grace period 10 dataset only
 
 data_processed <-
-  map(.x = list(6, 7, 8, 9), # add additional longer grace periods besides the # primary grace period 7 days (baseline_date + 6)
+  map(.x = list(6, 7, 8, 9), # add additional longer grace periods besides the primary grace period 10 days (baseline_date + 9)
       .f = ~ process_data(data_extracted, study_dates, treat_window_days = .x))
 names(data_processed) <- c("grace7", "grace8", "grace9", "grace10")
 
 # currently all deaths are covid-related (see above) and deregistration date not available -> modify dummy data?
-# unique(data_processed_g7$out_date_death_28)
-# unique(data_processed_g7$out_date_noncovid_death) # no noncovid deaths
-# unique(data_processed_g7$out_date_covid_death)
+# unique(data_processed_g10$out_date_death_28)
+# unique(data_processed_g10$out_date_noncovid_death) # no noncovid deaths
+# unique(data_processed_g10$out_date_covid_death)
 
-# data_processed_g7 %>% # why do some have a date of death before baseline dates and marked qa_bin_was_alive == TRUE? dummy data?
+# data_processed_g10 %>% # why do some have a date of death before baseline dates and marked qa_bin_was_alive == TRUE? dummy data?
 #   select(patient_id, baseline_date, period_week, period_month, period_2month, period_3month, status_primary, fu_primary, qa_date_of_death, qa_bin_was_alive) %>%
 #   View()
 
@@ -114,9 +115,9 @@ names(data_processed) <- c("grace7", "grace8", "grace9", "grace10")
 ################################################################################
 # 3 Apply quality assurance criteria
 ################################################################################
-n_qa_excluded <- quality_assurance(data_processed$grace7)
+n_qa_excluded <- quality_assurance(data_processed$grace10)
 
-data_processed_g7 <- data_processed_g7 %>%
+data_processed_g10 <- data_processed_g10 %>%
   filter(!is.na(qa_num_birth_year)) %>%
   filter(is.na(qa_date_of_death) | (qa_num_birth_year <= year(qa_date_of_death))) %>%
   filter(qa_num_birth_year >= 1793 & qa_num_birth_year <= year(Sys.Date())) %>%
@@ -140,9 +141,9 @@ data_processed <-
 ################################################################################
 # 4 Apply eligibility criteria
 ################################################################################
-n_excluded <- calc_n_excluded(data_processed$grace7)
+n_excluded <- calc_n_excluded(data_processed$grace10)
 
-data_processed_g7 <- data_processed_g7 %>%
+data_processed_g10 <- data_processed_g10 %>%
   # completeness criteria
   filter(qa_bin_was_alive == TRUE & (qa_date_of_death > baseline_date | is.na(qa_date_of_death))) %>% # additional condition since "qa_bin_was_alive == TRUE" may not cover all (e.g. pos test came out after death)
   filter(qa_bin_is_female_or_male == TRUE) %>%
@@ -186,12 +187,12 @@ data_processed <-
   )
 
 # why are some periods (at the end) NA? Double-check!
-# data_processed$grace7 %>%
+# data_processed$grace10 %>%
 #   select(patient_id, baseline_date, period_week, period_month, period_2month, period_3month, status_primary, fu_primary, qa_date_of_death, qa_bin_was_alive) %>%
 #   View()
 
 # # contraindications
-# n_excluded_contraindicated <- calc_n_excluded_contraindicated(data_processed$grace7)
+# n_excluded_contraindicated <- calc_n_excluded_contraindicated(data_processed$grace10)
 # data_processed <-
 #   map(.x = data_processed,
 #       .f = ~ .x %>% add_contraindicated_indicator())
@@ -200,14 +201,21 @@ data_processed <-
 #       .f = ~ .x %>% filter(contraindicated == FALSE))
 
 ################################################################################
-# 5 Save data and steps/numbers of excluded participants
+# 5 Apply treatment window
+################################################################################
+n_treated <- calc_n_treated(data_processed$grace10)
+
+################################################################################
+# 6 Save data and steps/numbers of excluded participants
 ################################################################################
 iwalk(.x = data_processed,
       .f = ~ write_rds(.x,
                        here::here("output", "data",
-                                  paste0("data_processed", "_"[!.y == "grace7"],
-                                    .y[!.y == "grace7"], ".rds"))))
+                                  paste0("data_processed", "_"[!.y == "grace10"],
+                                    .y[!.y == "grace10"], ".rds"))))
 write_rds(n_qa_excluded,
           here::here("output", "data_properties", "n_qa_excluded.rds"))
 write_rds(n_excluded,
           here::here("output", "data_properties", "n_excluded.rds"))
+write_rds(n_excluded,
+          here::here("output", "data_properties", "n_treated.rds"))
