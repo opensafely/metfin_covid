@@ -4,16 +4,7 @@
 # Credits to https://github.com/ZoeMZou 
 #######################################################################################
 from ehrql.tables.tpp import (
-    patients, 
-    practice_registrations, 
-    addresses, 
-    appointments, 
-    occupation_on_covid_vaccine_record,
-    vaccinations,
-    sgss_covid_all_tests,
     apcs, 
-    ec, 
-    opa, 
     opa_diag, 
     clinical_events, 
     medications, 
@@ -76,19 +67,31 @@ def last_matching_event_opa_before(codelist, baseline_date, where=True):
         .last_for_patient()
     )
 
+## In EMERGENCY CARE
+def last_matching_event_ec_snomed_before(codelist, baseline_date, where=True):
+    conditions = [
+        getattr(emergency_care_attendances, column_name).is_in(codelist)
+        for column_name in ([f"diagnosis_{i:02d}" for i in range(1, 25)])
+    ]
+    return(
+        emergency_care_attendances.where()
+        .where(any_of(conditions))
+        .where(emergency_care_attendances.arrival_date.is_before(baseline_date))
+        .sort_by(emergency_care_attendances.arrival_date)
+        .last_for_patient()
+    )
+
 ## DEATH
-def cause_of_death_matches(codelist):
+def matching_death_before(codelist, baseline_date, where=True):
     conditions = [
         getattr(ons_deaths, column_name).is_in(codelist)
         for column_name in (["underlying_cause_of_death"]+[f"cause_of_death_{i:02d}" for i in range(1, 16)])
     ]
-    return any_of(conditions)
-
-def matching_death_before(codelist, baseline_date):
     return(
-        cause_of_death_matches(codelist)
+        ons_deaths.where()
+        .where(any_of(conditions))
         .where(ons_deaths.date.is_on_or_before(baseline_date))
-)
+    )
 
 
 ### HISTORY of ... in past ... days/months/years (including baseline_date)
@@ -135,6 +138,20 @@ def last_matching_event_opa_between(codelist, start_date, baseline_date, where=T
         .where(opa_diag.primary_diagnosis_code.is_in(codelist) | opa_diag.secondary_diagnosis_code_1.is_in(codelist))
         .where(opa_diag.appointment_date.is_on_or_between(start_date, baseline_date))
         .sort_by(opa_diag.appointment_date)
+        .last_for_patient()
+    )
+
+## In EMERGENCY CARE
+def last_matching_event_ec_snomed_before(codelist, start_date, baseline_date, where=True):
+    conditions = [
+        getattr(emergency_care_attendances, column_name).is_in(codelist)
+        for column_name in ([f"diagnosis_{i:02d}" for i in range(1, 25)])
+    ]
+    return(
+        emergency_care_attendances.where()
+        .where(any_of(conditions))
+        .where(emergency_care_attendances.arrival_date.is_on_or_between(start_date, baseline_date))
+        .sort_by(emergency_care_attendances.arrival_date)
         .last_for_patient()
     )
 
@@ -223,24 +240,27 @@ def first_matching_event_opa_between(codelist, baseline_date, end_date, where=Tr
     )
 
 ## In EMERGENCY CARE
-def emergency_diagnosis_matches(codelist):
+def first_matching_event_ec_snomed_between(codelist, baseline_date, end_date, where=True):
     conditions = [
         getattr(emergency_care_attendances, column_name).is_in(codelist)
-        for column_name in [f"diagnosis_{i:02d}" for i in range(1, 25)]
+        for column_name in ([f"diagnosis_{i:02d}" for i in range(1, 25)])
     ]
-    return emergency_care_attendances.where(any_of(conditions))
-
-def first_matching_event_ec_between(codelist, baseline_date, end_date):
     return(
-        emergency_diagnosis_matches(codelist)
+        emergency_care_attendances.where()
+        .where(any_of(conditions))
         .where(emergency_care_attendances.arrival_date.is_on_or_between(baseline_date, end_date))
         .sort_by(emergency_care_attendances.arrival_date)
         .first_for_patient()
-)
+    )
 
 ## DEATH
-def matching_death_between(codelist, baseline_date, end_date):
+def matching_death_between(codelist, baseline_date, end_date, where=True):
+    conditions = [
+        getattr(ons_deaths, column_name).is_in(codelist)
+        for column_name in (["underlying_cause_of_death"]+[f"cause_of_death_{i:02d}" for i in range(1, 16)])
+    ]
     return(
-        cause_of_death_matches(codelist)
+        ons_deaths.where()
+        .where(any_of(conditions))
         .where(ons_deaths.arrival_date.is_on_or_between(baseline_date, end_date))
-)
+    )
