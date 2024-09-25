@@ -258,7 +258,7 @@ def first_matching_event_ec_snomed_between(codelist, baseline_date, end_date, wh
         for column_name in ([f"diagnosis_{i:02d}" for i in range(1, 25)])
     ]
     return(
-        emergency_care_attendances.where()
+        emergency_care_attendances.where(where)
         .where(any_of(conditions))
         .where(emergency_care_attendances.arrival_date.is_on_or_between(baseline_date, end_date))
         .sort_by(emergency_care_attendances.arrival_date)
@@ -271,13 +271,10 @@ def matching_death_between(codelist, baseline_date, end_date, where=True):
         getattr(ons_deaths, column_name).is_in(codelist)
         for column_name in (["underlying_cause_of_death"]+[f"cause_of_death_{i:02d}" for i in range(1, 16)])
     ]
-    return(
-        ons_deaths.where()
-        .where(any_of(conditions))
-        .where(ons_deaths.arrival_date.is_on_or_between(baseline_date, end_date))
+    return(any_of(conditions) & ons_deaths.date.is_on_or_between(baseline_date, end_date)
     )
 
-### Causes of DEATH without any date restrictions
+### CAUSES of DEATH without any date restrictions
 def cause_of_death_matches(codelist):
     conditions = [
         getattr(ons_deaths, column_name).is_in(codelist)
