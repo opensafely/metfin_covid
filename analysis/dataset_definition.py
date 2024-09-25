@@ -1,7 +1,8 @@
 #######################################################################################
 # IMPORT
 #######################################################################################
-## ehrQL
+
+## ehrQL functions
 from ehrql import (
     case,
     codelist_from_csv,
@@ -13,6 +14,7 @@ from ehrql import (
     maximum_of
 )
 
+## TPP tables
 from ehrql.tables.tpp import (
     addresses,
     clinical_events,
@@ -30,27 +32,22 @@ from ehrql.tables.tpp import (
     emergency_care_attendances
 )
 
-#from databuilder.codes import CTV3Code, ICD10Code # for BMI variable (among others)
-# from ehrql.codes import CTV3Code, ICD10Code # see line above
-#from ehrql.tables.beta import tpp as schema # for BMI variable (among others) .beta or without .beta?
-# from ehrql.tables import tpp as schema # see line above
-
-## from codelists.py
+## All codelists from codelists.py
 from codelists import *
 
-## datetime function
-#from datetime import date ## needed?
+## variable helper functions 
+from variable_helper_functions import *
 
-## to import json files (for the dates)
+## json and pathlib (for the dates)
 import json
 from pathlib import Path
 
-## helper function
-import study_definition_helper_functions as helpers
-
-import numpy as np # for random seed
+# numpy for random seed - and set random seed
+import numpy as np 
 np.random.seed(1928374) # random seed
 
+## datetime function
+#from datetime import date ## needed?
 
 #######################################################################################
 # DEFINE the dates: Import study dates defined in "study-dates.R" and exported to JSON
@@ -61,52 +58,29 @@ study_dates = json.loads(
 # Change these in ./lib/design/study-dates.R if necessary
 studystart_date = study_dates["studystart_date"]
 studyend_date = study_dates["studyend_date"]
-#followupend_date = study_dates["followupend_date"]
-#vaccine_peak_date = study_dates["vaccine_peak_date"]
-# add sub-cohort dates, to replace studystart_date & studyend_date for each sub-cohort?
 
 #######################################################################################
-# DEFINE the baseline date based on SARS-CoV-2 infection
+# DEFINE the baseline date (= index date) based on SARS-CoV-2 infection
 #######################################################################################
-## All COVID-19 events in primary care
-primary_care_covid_events = clinical_events.where(
-    clinical_events.ctv3_code.is_in(
-        covid_primary_care_code
-        + covid_primary_care_positive_test
-        + covid_primary_care_sequelae
-    )
-)
-## First COVID-19 code (diagnosis, positive test or sequelae) in primary care in recruitment period
+## First COVID-19 event in primary care in recruitment period
 tmp_covid19_primary_care_date = (
-    primary_care_covid_events.where(clinical_events.date.is_on_or_between(studystart_date,studyend_date))
-    .sort_by(clinical_events.date)
-    .first_for_patient()
-    .date
-)
-tmp_covid19_primary_care_events = (
-    primary_care_covid_events.where(clinical_events.date.is_on_or_between(studystart_date,studyend_date))
-    .exists_for_patient()
-)
+    first_matching_event_clinical_ctv3_between(
+        covid_primary_care_code + covid_primary_care_positive_test + covid_primary_care_sequelae, studystart_date, studyend_date)
+        .date
+        )
 
 ## First positive SARS-COV-2 PCR in recruitment period
 tmp_covid19_sgss_date = (
     sgss_covid_all_tests.where(
-        sgss_covid_all_tests.is_positive.is_not_null()) # double-check with https://docs.opensafely.org/ehrql/reference/schemas/beta.tpp/#sgss_covid_all_tests
-        .where(sgss_covid_all_tests.lab_report_date.is_on_or_between(studystart_date,studyend_date))
-        .sort_by(sgss_covid_all_tests.lab_report_date)
+        sgss_covid_all_tests.specimen_taken_date.is_on_or_between(studystart_date, studyend_date))
+        .where(sgss_covid_all_tests.is_positive)
+        .sort_by(sgss_covid_all_tests.specimen_taken_date)
         .first_for_patient()
-        .lab_report_date
-)
-
-tmp_covid19_sgss_events = (
-    sgss_covid_all_tests.where(
-        sgss_covid_all_tests.is_positive.is_not_null()) # double-check with https://docs.opensafely.org/ehrql/reference/schemas/beta.tpp/#sgss_covid_all_tests
-        .where(sgss_covid_all_tests.lab_report_date.is_on_or_between(studystart_date,studyend_date))
-        .exists_for_patient()
-)
+        .specimen_taken_date
+        )
 
 """
-## First covid-19 related hospital admission in recruitment period // include or exclude since we are only (?) interested in recruitment in primary care -> only include as outcome
+## First covid-19 related hospital admission in recruitment period // exclude since we are only (?) interested in recruitment in primary care? / all_diagnoses versus primary/sec diagnosis?
 tmp_covid19_hes_date = (
     hospital_admissions.where(hospital_admissions.all_diagnoses.is_in(covid_codes)) # double-check with https://github.com/opensafely/comparative-booster-spring2023/blob/main/analysis/codelists.py uses a different codelist: codelists/opensafely-covid-identification.csv
     .where(hospital_admissions.admission_date.is_on_or_between(studystart_date,studyend_date))
@@ -119,202 +93,19 @@ tmp_covid19_hes_date = (
 ### Define (first) baseline date within recruitment period
 baseline_date = minimum_of(tmp_covid19_primary_care_date, tmp_covid19_sgss_date)
 
-#######################################################################################
-# FUNCTIONS (all based on baseline_date)
-#######################################################################################
-### PRIMARY CARE
-## EVER BEFORE BASELINE DATE (any history of)
-# Any event (clinical_events table)
-prior_events = clinical_events.where(clinical_events.date.is_on_or_before(baseline_date))
-def has_prior_event_snomed(codelist, where=True): # snomed codelist
-    return (
-        prior_events.where(where)
-        .where(prior_events.snomedct_code.is_in(codelist))
-        .exists_for_patient()
-    )
-def has_prior_event_ctv3(codelist, where=True): # ctv3 codelist
-    return (
-        prior_events.where(where)
-        .where(prior_events.ctv3_code.is_in(codelist))
-        .exists_for_patient()
-    )
-# Most recent event date
-def prior_event_date_snomed(codelist, where=True): # snomed codelist
-    return (
-        prior_events.where(where)
-        .where(prior_events.snomedct_code.is_in(codelist))
-        .sort_by(prior_events.date)
-        .last_for_patient()
-        .date
-    )
-def prior_event_date_ctv3(codelist, where=True): # ctv3 codelist
-    return (
-        prior_events.where(where)
-        .where(prior_events.ctv3_code.is_in(codelist))
-        .sort_by(prior_events.date)
-        .last_for_patient()
-        .date
-    )
-# Count all prior events
-def prior_events_count_ctv3(codelist, where=True): # ctv3 codelist
-    return (
-        prior_events.where(where)
-        .where(prior_events.ctv3_code.is_in(codelist))
-        .count_for_patient()
-    )
-# Any medication prescription (medications table) 
-prior_prescription = medications.where(medications.date.is_on_or_before(baseline_date))
-def has_prior_prescription(codelist, where=True): # always DMD codes
-    return (
-        prior_prescription.where(where)
-        .where(prior_prescription.dmd_code.is_in(codelist))
-        .exists_for_patient()
-    )
-# Most recent prescription date
-def has_prior_prescription_date(codelist, where=True):
-    return (
-        prior_prescription.where(where)
-        .where(prior_prescription.dmd_code.is_in(codelist))
-        .sort_by(prior_prescription.date)
-        .last_for_patient()
-        .date
-    )
-
-## 2y BEFORE BASELINE DATE 
-# Most recent value (clinical_events table)
-recent_value_2y = clinical_events.where(clinical_events.date.is_on_or_between(baseline_date - days(2*366), baseline_date)) # Calculated from 1 year = 365.25 days, taking into account leap years. 
-def recent_value_2y_snomed(codelist, where=True): # snomed codelist
-    return (
-        recent_value_2y.where(where)
-        .where(recent_value_2y.snomedct_code.is_in(codelist))
-        .numeric_value.maximum_for_patient()
-    )
-def recent_value_2y_ctv3(codelist, where=True): # ctv3 codelist
-    return (
-        recent_value_2y.where(where)
-        .where(recent_value_2y.ctv3_code.is_in(codelist))
-        .numeric_value.maximum_for_patient()
-    )
-
-## 6M BEFORE BASELINE DATE (only for prescription data)
-# Any medication prescription (medications table) 
-prior_prescription_6m = medications.where(medications.date.is_on_or_between(baseline_date - days(183), baseline_date)) # Calculated from 1 year = 365.25 days, taking into account leap years. 
-def has_prior_prescription_6m(codelist, where=True): # always DMD codes
-    return (
-        prior_prescription_6m.where(where)
-        .where(prior_prescription_6m.dmd_code.is_in(codelist))
-        .exists_for_patient()
-    )
-# Most recent prescription date
-def has_prior_prescription_6m_date(codelist, where=True):
-    return (
-        prior_prescription_6m.where(where)
-        .where(prior_prescription_6m.dmd_code.is_in(codelist))
-        .sort_by(prior_prescription_6m.date)
-        .last_for_patient()
-        .date
-    )
-## 14 Days BEFORE BASELINE DATE (only for prescription data)
-# Any medication prescription (medications table) 
-prior_prescription_14d = medications.where(medications.date.is_on_or_between(baseline_date - days(14), baseline_date))
-def has_prior_prescription_14d(codelist, where=True): # always DMD codes
-    return (
-        prior_prescription_14d.where(where)
-        .where(prior_prescription_14d.dmd_code.is_in(codelist))
-        .exists_for_patient()
-    )
-# Most recent prescription date
-def has_prior_prescription_14d_date(codelist, where=True):
-    return (
-        prior_prescription_14d.where(where)
-        .where(prior_prescription_14d.dmd_code.is_in(codelist))
-        .sort_by(prior_prescription_14d.date)
-        .last_for_patient()
-        .date
-    )
-
-### HOSPITAL ADMISSIONS (HES APC)
-## EVER BEFORE BASELINE DATE (any history of)
-# Any event (hospital_admissions table)
-prior_admissions = hospital_admissions.where(hospital_admissions.admission_date.is_on_or_before(baseline_date))
-def has_prior_admission(codelist, where=True):
-    return (
-        prior_admissions.where(where)
-        .where(prior_admissions.all_diagnoses.is_in(codelist))
-        .exists_for_patient()
-    )
-# Most recent event (date)
-def prior_admission_date(codelist, where=True):
-    return (
-        prior_admissions.where(where)
-        .where(prior_admissions.all_diagnoses.is_in(codelist))
-        .sort_by(prior_admissions.admission_date)
-        .last_for_patient()
-        .admission_date
-    )
-# Count all prior admissions
-def prior_admissions_count(codelist, where=True):
-    return (
-        prior_admissions.where(where)
-        .where(prior_admissions.all_diagnoses.is_in(codelist))
-        .count_for_patient()
-    )
-
-### OTHER functions, based on https://github.com/opensafely/comparative-booster-spring2023/blob/main/analysis/dataset_definition.py
-# helper function
-def any_of(conditions):
-    return reduce(operator.or_, conditions)
-
-# for BMI calculation, 
-def most_recent_bmi(*, minimum_age_at_measurement, where=True):
-    clinical_events = schema.clinical_events
-    age_threshold = schema.patients.date_of_birth + days(
-        # This is obviously inexact but, given that the dates of birth are rounded to
-        # the first of the month anyway, there's no point trying to be more accurate
-        int(365.25 * minimum_age_at_measurement)
-    )
-    return (
-        # This captures just explicitly recorded BMI observations rather than attempting
-        # to calculate it from height and weight measurements. Investigation has shown
-        # this to have no real benefit it terms of coverage or accuracy.
-        clinical_events.where(clinical_events.ctv3_code == CTV3Code("22K.."))
-        .where(clinical_events.date >= age_threshold)
-        .where(where)
-        .sort_by(clinical_events.date)
-        .last_for_patient()
-    )
-
-# query if emergency attentance diagnosis codes match a given codelist
-def emergency_diagnosis_matches(codelist):
-    conditions = [
-        getattr(emergency_care_attendances, column_name).is_in(codelist)
-        for column_name in [f"diagnosis_{i:02d}" for i in range(1, 25)]
-    ]
-    return emergency_care_attendances.where(any_of(conditions))
-
-# query if causes of death match a given codelist
-def cause_of_death_matches(codelist):
-    conditions = [
-        getattr(ons_deaths, column_name).is_in(codelist)
-        for column_name in (["underlying_cause_of_death"]+[f"cause_of_death_{i:02d}" for i in range(1, 16)])
-    ]
-    return any_of(conditions)
-
 
 #######################################################################################
 # INITIALISE the dataset, define the baseline date and event, and set the dummy dataset size
 #######################################################################################
 dataset = create_dataset()
-dataset.configure_dummy_data(population_size=1000)
+dataset.configure_dummy_data(population_size=100)
 dataset.baseline_date = baseline_date
 dataset.define_population(patients.exists_for_patient())
 
-dataset.cov_bin_pos_covid = tmp_covid19_primary_care_events | tmp_covid19_sgss_events
 
 #######################################################################################
 # QUALITY ASSURANCES and completeness criteria
 #######################################################################################
-
 # population variables for dataset definition 
 dataset.qa_bin_is_female_or_male = patients.sex.is_in(["female", "male"]) 
 dataset.qa_bin_was_adult = (patients.age_on(baseline_date) >= 18) & (patients.age_on(baseline_date) <= 110) 
@@ -324,23 +115,13 @@ dataset.qa_bin_known_imd = addresses.for_patient_on(baseline_date).exists_for_pa
 dataset.qa_bin_was_registered = practice_registrations.spanning(baseline_date - days(366), baseline_date).exists_for_patient() # only include if registered on baseline date spanning back 1 year. Calculated from 1 year = 365.25 days, taking into account leap years.
 # double-check line above against code from Will, line 98: https://github.com/opensafely/comparative-booster-spring2023/blob/main/analysis/dataset_definition.py 
 
-"""
-# define/create dataset // eventually take out to show entire flow chart
-dataset.define_population(
-    is_female_or_male
-    & was_adult
-    & was_alive
-    & was_registered
-) 
-"""
-
 ## Year of birth
 dataset.qa_num_birth_year = patients.date_of_birth
 
 ## Date of death
 dataset.qa_date_of_death = ons_deaths.date
 
-## Pregnancy (over entire study period, not based on baseline date -> no function for this)
+## Pregnancy (over entire study period, not based on baseline date -> don't have helper function for this)
 dataset.qa_bin_pregnancy = (
     clinical_events.where(
         clinical_events.snomedct_code.is_in(pregnancy_snomed_clinical))
@@ -348,12 +129,12 @@ dataset.qa_bin_pregnancy = (
         )
 
 ## Combined oral contraceptive pill
-dataset.qa_bin_cocp = has_prior_prescription(cocp_dmd)
+dataset.qa_bin_cocp = last_matching_med_dmd_before(cocp_dmd, baseline_date).exists_for_patient()
 
 ## Hormone replacement therapy
-dataset.qa_bin_hrt = has_prior_prescription(hrt_dmd)
+dataset.qa_bin_hrt = last_matching_med_dmd_before(hrt_dmd, baseline_date).exists_for_patient()
 
-## Prostate cancer (over entire study period, not based on baseline date -> no function for this)
+## Prostate cancer (over entire study period, not based on baseline date -> don't have helper function for this)
 ### Primary care
 prostate_cancer_snomed = (
     clinical_events.where(
@@ -362,8 +143,8 @@ prostate_cancer_snomed = (
         )
 ### HES APC
 prostate_cancer_hes = (
-    hospital_admissions.where(
-        hospital_admissions.all_diagnoses.is_in(prostate_cancer_icd10))
+    apcs.where(
+        apcs.all_diagnoses.is_in(prostate_cancer_icd10))
         .exists_for_patient()
         )
 ### ONS (stated anywhere on death certificate)
@@ -373,24 +154,19 @@ dataset.qa_bin_prostate_cancer = case(
     when(prostate_cancer_snomed).then(True),
     when(prostate_cancer_hes).then(True),
     when(prostate_cancer_death).then(True),
-    default=False
+    otherwise=False
 )
-
 
 #######################################################################################
 # DEMOGRAPHIC variables
 #######################################################################################
-
-## sex
+## Sex
 dataset.cov_cat_sex = patients.sex
 
-## age
+## Age
 dataset.cov_num_age = patients.age_on(baseline_date)
 
-### Age on 1 January 2020
-#dataset.age_jan2020 = patients.age_on("2020-01-01")
-
-## ethnicity in 6 categories based on codelists/opensafely-ethnicity.csv only. https://github.com/opensafely/comparative-booster-spring2023/blob/main/analysis/codelists.py  
+## Ethnicity in 6 categories based on codelists/opensafely-ethnicity.csv only. https://github.com/opensafely/comparative-booster-spring2023/blob/main/analysis/codelists.py  
 dataset.cov_cat_ethnicity = (
     clinical_events.where(clinical_events.ctv3_code.is_in(ethnicity_codes))
     .sort_by(clinical_events.date)
@@ -398,33 +174,18 @@ dataset.cov_cat_ethnicity = (
     .ctv3_code.to_category(ethnicity_codes)
 )
 
-## Deprivation
-# Index of Multiple Deprevation Rank (rounded down to nearest 100)
+## Index of Multiple Deprevation Rank (rounded down to nearest 100). 5 categories.
 imd_rounded = addresses.for_patient_on(baseline_date).imd_rounded
-dataset.cov_cat_deprivation_10 = case(
-    when((imd_rounded >=0) & (imd_rounded < int(32844 * 1 / 10))).then("1 (most deprived)"),
-    when(imd_rounded < int(32844 * 2 / 10)).then("2"),
-    when(imd_rounded < int(32844 * 3 / 10)).then("3"),
-    when(imd_rounded < int(32844 * 4 / 10)).then("4"),
-    when(imd_rounded < int(32844 * 5 / 10)).then("5"),
-    when(imd_rounded < int(32844 * 6 / 10)).then("6"),
-    when(imd_rounded < int(32844 * 7 / 10)).then("7"),
-    when(imd_rounded < int(32844 * 8 / 10)).then("8"),
-    when(imd_rounded < int(32844 * 9 / 10)).then("9"),
-    when(imd_rounded < int(32844 * 10 / 10)).then("10 (least deprived)"),
-    default="unknown"
-)
-
 dataset.cov_cat_deprivation_5 = case(
     when((imd_rounded >=0) & (imd_rounded < int(32844 * 1 / 5))).then("1 (most deprived)"),
     when(imd_rounded < int(32844 * 2 / 5)).then("2"),
     when(imd_rounded < int(32844 * 3 / 5)).then("3"),
     when(imd_rounded < int(32844 * 4 / 5)).then("4"),
     when(imd_rounded < int(32844 * 5 / 5)).then("5 (least deprived)"),
-    default="unknown"
+    otherwise="unknown"
 )
 
-# registration info as at baseline date
+## Registration info at baseline date
 registered = practice_registrations.for_patient_on(baseline_date)
 
 ## Region
@@ -440,79 +201,65 @@ dataset.cov_cat_stp = registered.practice_stp
 #######################################################################################
 # ELIGIBILITY variables
 #######################################################################################
-
 ### DIABETES start ---------
-# BASED on https://github.com/opensafely/post-covid-diabetes/blob/main/analysis/common_variables.py 
-### Type 1 Diabetes
-# Date of latest recording
-# Primary care
-tmp_cov_date_t1dm_ctv3 = prior_event_date_ctv3(diabetes_type1_ctv3_clinical) # changed name to ctv3
-dataset.tmp_cov_date_t1dm_ctv3 = tmp_cov_date_t1dm_ctv3
-# HES APC
-tmp_cov_date_t1dm_hes = prior_admission_date(diabetes_type1_icd10)
-# Combined
-cov_date_t1dm = minimum_of(tmp_cov_date_t1dm_ctv3, tmp_cov_date_t1dm_hes)
+### BASED on https://github.com/opensafely/post-covid-diabetes/blob/main/analysis/common_variables.py 
+
+## Type 1 Diabetes 
+# Latest date from primary+secondary, but also primary care date separately for diabetes algo)
+dataset.tmp_cov_date_t1dm_ctv3 = last_matching_event_clinical_ctv3_before(diabetes_type1_ctv3_clinical, baseline_date).date
+cov_date_t1dm = minimum_of(
+    (last_matching_event_clinical_ctv3_before(diabetes_type1_ctv3_clinical, baseline_date).date),
+    (last_matching_event_apc_before(diabetes_type1_icd10, baseline_date).admission_date)
+)
 dataset.cov_date_t1dm = cov_date_t1dm
+# Count codes (individually and together, for diabetes algo)
+dataset.tmp_cov_count_t1dm_ctv3 = count_matching_event_clinical_ctv3_before(diabetes_type1_ctv3_clinical, baseline_date)
+dataset.tmp_cov_count_t1dm_hes = count_matching_event_apc_before(diabetes_type1_icd10, baseline_date)
+dataset.tmp_cov_count_t1dm = (
+    count_matching_event_clinical_ctv3_before(diabetes_type1_ctv3_clinical, baseline_date)
+    +
+    count_matching_event_apc_before(diabetes_type1_icd10, baseline_date)
+)
 
-# Count of number of records
-# Primary care
-tmp_cov_count_t1dm_ctv3 = prior_events_count_ctv3(diabetes_type1_ctv3_clinical) # changed name to ctv3
-dataset.tmp_cov_count_t1dm_ctv3 = tmp_cov_count_t1dm_ctv3
-# HES APC
-tmp_cov_count_t1dm_hes = prior_admissions_count(diabetes_type1_icd10)
-dataset.tmp_cov_count_t1dm_hes = tmp_cov_count_t1dm_hes
-# Combined
-dataset.tmp_cov_count_t1dm = tmp_cov_count_t1dm_ctv3 + tmp_cov_count_t1dm_hes
-
-### Type 2 Diabetes
-# Date of latest recording
-# Primary care
-tmp_cov_date_t2dm_ctv3 = prior_event_date_ctv3(diabetes_type2_ctv3_clinical) # change name to ctv3
-dataset.tmp_cov_date_t2dm_ctv3 = tmp_cov_date_t2dm_ctv3
-# HES APC
-tmp_cov_date_t2dm_hes = prior_admission_date(diabetes_type2_icd10)
-# Combined
-cov_date_t2dm = minimum_of(tmp_cov_date_t2dm_ctv3, tmp_cov_date_t2dm_hes)
+## Type 2 Diabetes
+# Latest date from primary+secondary, but also primary care date separately for diabetes algo)
+dataset.tmp_cov_date_t2dm_ctv3 = last_matching_event_clinical_ctv3_before(diabetes_type2_ctv3_clinical, baseline_date).date
+cov_date_t2dm = minimum_of(
+    (last_matching_event_clinical_ctv3_before(diabetes_type2_ctv3_clinical, baseline_date).date),
+    (last_matching_event_apc_before(diabetes_type2_icd10, baseline_date).admission_date)
+)
 dataset.cov_date_t2dm = cov_date_t2dm
+# Count codes (individually and together, for diabetes algo)
+dataset.tmp_cov_count_t2dm_ctv3 = count_matching_event_clinical_ctv3_before(diabetes_type2_ctv3_clinical, baseline_date)
+dataset.tmp_cov_count_t2dm_hes = count_matching_event_apc_before(diabetes_type2_icd10, baseline_date)
+dataset.tmp_cov_count_t2dm = (
+    count_matching_event_clinical_ctv3_before(diabetes_type2_ctv3_clinical, baseline_date)
+    +
+    count_matching_event_apc_before(diabetes_type2_icd10, baseline_date)
+)
 
-# Count of number of records
-# Primary care
-tmp_cov_count_t2dm_ctv3 = prior_events_count_ctv3(diabetes_type2_ctv3_clinical) # change name to ctv3
-dataset.tmp_cov_count_t2dm_ctv3 = tmp_cov_count_t2dm_ctv3
-# HES APC
-tmp_cov_count_t2dm_hes = prior_admissions_count(diabetes_type2_icd10)
-dataset.tmp_cov_count_t2dm_hes = tmp_cov_count_t2dm_hes
-# Combined
-dataset.tmp_cov_count_t2dm = tmp_cov_count_t2dm_ctv3 + tmp_cov_count_t2dm_hes
-
-### Diabetes unspecified/other
-# Date of latest recording
-# Primary care
-cov_date_otherdm = prior_event_date_ctv3(diabetes_other_ctv3_clinical)
+## Diabetes unspecified/other
+# Latest date
+cov_date_otherdm = last_matching_event_clinical_ctv3_before(diabetes_other_ctv3_clinical, baseline_date).date
 dataset.cov_date_otherdm = cov_date_otherdm
+# Count codes
+dataset.tmp_cov_count_otherdm = count_matching_event_clinical_ctv3_before(diabetes_other_ctv3_clinical, baseline_date)
 
-# Count of number of records
-# Primary care
-dataset.tmp_cov_count_otherdm = prior_events_count_ctv3(diabetes_other_ctv3_clinical)
-
-### Gestational diabetes
-# Date of latest recording
-# Primary care
-cov_date_gestationaldm = prior_event_date_ctv3(diabetes_gestational_ctv3_clinical)
+## Gestational diabetes
+# Latest date
+cov_date_gestationaldm = last_matching_event_clinical_ctv3_before(diabetes_gestational_ctv3_clinical, baseline_date).date
 dataset.cov_date_gestationaldm = cov_date_gestationaldm
 
-### Diabetes diagnostic codes
-# Date of latest recording
-# Primary care
-tmp_cov_date_poccdm = prior_event_date_ctv3(diabetes_diagnostic_ctv3_clinical)
+## Diabetes diagnostic codes
+# Latest date
+tmp_cov_date_poccdm = last_matching_event_clinical_ctv3_before(diabetes_diagnostic_ctv3_clinical, baseline_date).date
 dataset.tmp_cov_date_poccdm = tmp_cov_date_poccdm
-
-# Count of number of records
-# Primary care
-dataset.tmp_cov_count_poccdm_ctv3 = prior_events_count_ctv3(diabetes_diagnostic_ctv3_clinical) # changed name to ctv3
+# Count codes
+dataset.tmp_cov_count_poccdm_ctv3 = count_matching_event_clinical_ctv3_before(diabetes_diagnostic_ctv3_clinical, baseline_date)
 
 ### Other variables needed to define diabetes
-# Maximum HbA1c measure (in period before baseline_date)
+## HbA1c
+# Maximum HbA1c measure (in period before baseline_date) -> don't have helper function for this
 tmp_cov_num_max_hba1c_mmol_mol = (
     clinical_events.where(
         clinical_events.ctv3_code.is_in(hba1c_new_codes))
@@ -520,7 +267,6 @@ tmp_cov_num_max_hba1c_mmol_mol = (
         .numeric_value.maximum_for_patient()
 )
 dataset.tmp_cov_num_max_hba1c_mmol_mol = tmp_cov_num_max_hba1c_mmol_mol
-
 # Date of latest maximum HbA1c measure
 dataset.tmp_cov_date_max_hba1c = ( 
     clinical_events.where(
@@ -531,22 +277,24 @@ dataset.tmp_cov_date_max_hba1c = (
         .last_for_patient() # translates in cohortextractor to "on_most_recent_day_of_measurement=True"
         .date
 )
-#  Diabetes drugs
-tmp_cov_date_insulin_snomed = has_prior_prescription_date(insulin_snomed_clinical)
+
+## Diabetes drugs
+# Latest dates
+tmp_cov_date_insulin_snomed = last_matching_med_dmd_before(insulin_snomed_clinical, baseline_date).date
 dataset.tmp_cov_date_insulin_snomed = tmp_cov_date_insulin_snomed
-tmp_cov_date_antidiabetic_drugs_snomed = has_prior_prescription_date(antidiabetic_drugs_snomed_clinical)
+tmp_cov_date_antidiabetic_drugs_snomed = last_matching_med_dmd_before(antidiabetic_drugs_snomed_clinical, baseline_date).date
 dataset.tmp_cov_date_antidiabetic_drugs_snomed = tmp_cov_date_antidiabetic_drugs_snomed
-tmp_cov_date_nonmetform_drugs_snomed = has_prior_prescription_date(non_metformin_dmd) # this extra step makes sense for the diabetes algorithm (otherwise not)
+tmp_cov_date_nonmetform_drugs_snomed = last_matching_med_dmd_before(non_metformin_dmd, baseline_date).date # this extra step makes sense for the diabetes algorithm (otherwise not)
 dataset.tmp_cov_date_nonmetform_drugs_snomed = tmp_cov_date_nonmetform_drugs_snomed
 
-# Generate variable to identify latest date (in period before baseline_date) that any diabetes medication was prescribed
+# Identify latest date (in period before baseline_date) that any diabetes medication was prescribed
 tmp_cov_date_diabetes_medication = maximum_of(
     tmp_cov_date_insulin_snomed, 
     tmp_cov_date_antidiabetic_drugs_snomed) # why excluding tmp_cov_date_nonmetform_drugs_snomed? -> this extra step makes sense for the diabetes algorithm (otherwise not)
 dataset.tmp_cov_date_diabetes_medication = tmp_cov_date_diabetes_medication
 
-# Generate variable to identify latest date (in period before baseline_date) that any diabetes diagnosis codes were recorded
-dataset.tmp_cov_date_latest_diabetes_diag = maximum_of( # changed name to latest
+# Identify latest date (in period before baseline_date) that any diabetes diagnosis codes were recorded
+dataset.tmp_cov_date_latest_diabetes_diag = maximum_of(
          cov_date_t2dm, 
          cov_date_t1dm,
          cov_date_otherdm,
@@ -561,7 +309,7 @@ dataset.tmp_cov_date_latest_diabetes_diag = maximum_of( # changed name to latest
 
 ## Prediabetes, on or before baseline
 # Date of preDM code in primary care
-tmp_cov_date_prediabetes = prior_event_date_snomed(prediabetes_snomed)
+tmp_cov_date_prediabetes = last_matching_event_clinical_snomed_before(prediabetes_snomed, baseline_date).date
 # Date of preDM HbA1c measure in period before baseline_date in preDM range (mmol/mol): 42-47.9
 tmp_cov_date_predm_hba1c_mmol_mol = (
     clinical_events.where(
@@ -578,7 +326,7 @@ dataset.cov_date_prediabetes = maximum_of(
     tmp_cov_date_predm_hba1c_mmol_mol) 
 
 # Any preDM diagnosis in primary care
-tmp_cov_bin_prediabetes = has_prior_event_snomed(prediabetes_snomed)
+tmp_cov_bin_prediabetes = last_matching_event_clinical_snomed_before(prediabetes_snomed, baseline_date).exists_for_patient()
 # Any HbA1c preDM in primary care
 tmp_cov_bin_predm_hba1c_mmol_mol = (
     clinical_events.where(
@@ -590,309 +338,199 @@ tmp_cov_bin_predm_hba1c_mmol_mol = (
 # Any preDM diagnosis or Hb1Ac preDM range value (in period before baseline_date)
 dataset.cov_bin_prediabetes = tmp_cov_bin_prediabetes | tmp_cov_bin_predm_hba1c_mmol_mol
 
+
 ## Hospitalization at baseline (incl. 1 day prior)
 dataset.cov_bin_hosp_baseline = (
-    hospital_admissions.where(hospital_admissions.admission_date.is_on_or_between(baseline_date - days(1), baseline_date))
+    apcs.where(apcs.admission_date.is_on_or_between(baseline_date - days(1), baseline_date))
     .exists_for_patient()
 )
 
 ## Metformin use at baseline, defined as receiving a metformin prescription up until 6 months prior to baseline date (assuming half-yearly prescription for stable diabetes across GPs in the UK)
-dataset.cov_bin_metfin_before_baseline = has_prior_prescription_6m(metformin_codes) # https://www.opencodelists.org/codelist/user/john-tazare/metformin-dmd/48e43356/
-dataset.cov_date_metfin_before_baseline = has_prior_prescription_6m_date(metformin_codes)
+dataset.cov_bin_metfin_before_baseline = last_matching_med_dmd_between(metformin_codes, (baseline_date - days(183)), baseline_date).exists_for_patient() # https://www.opencodelists.org/codelist/user/john-tazare/metformin-dmd/48e43356/ / # Calculated from 1 year = 365.25 days, taking into account leap years. 
+dataset.cov_date_metfin_before_baseline = last_matching_med_dmd_between(metformin_codes, (baseline_date - days(183)), baseline_date).date
 
 ## Known hypersensitivity / intolerance to metformin, on or before baseline
-dataset.cov_bin_metfin_allergy = has_prior_event_snomed(metformin_allergy) 
+dataset.cov_bin_metfin_allergy = last_matching_event_clinical_snomed_before(metformin_allergy, baseline_date).exists_for_patient() 
 
 ## Moderate to severe renal impairment (eGFR of <30ml/min/1.73 m2; stage 4/5), on or before baseline
-# Primary care
-tmp_cov_bin_ckd45_snomed = has_prior_event_snomed(ckd_snomed_clinical_45) 
-# HES APC
-tmp_cov_bin_ckd4_hes = has_prior_admission(ckd_stage4_icd10)
-tmp_cov_bin_ckd5_hes = has_prior_admission(ckd_stage5_icd10)
-# Combined
-dataset.cov_bin_ckd_45 = tmp_cov_bin_ckd45_snomed | tmp_cov_bin_ckd4_hes | tmp_cov_bin_ckd5_hes
-# include kidney transplant? / dialysis? / eGFR? // https://github.com/opensafely/Paxlovid-and-sotrovimab/blob/main/analysis/study_definition.py#L595
+dataset.cov_bin_ckd_45 = (
+    last_matching_event_clinical_snomed_before(ckd_snomed_clinical_45, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(ckd_stage4_icd10 + ckd_stage5_icd10, baseline_date).exists_for_patient()
+)
 
-## Advance decompensated liver cirrhosis, on or before baseline 
-# Primary care
-tmp_cov_bin_liver_cirrhosis_snomed = has_prior_event_snomed(advanced_decompensated_cirrhosis_snomed_codes)
-tmp_cov_bin_ascitis_drainage_snomed = has_prior_event_snomed(ascitic_drainage_snomed_codes) # regular ascitic drainage
-# HES APC
-tmp_cov_bin_liver_cirrhosis_hes = has_prior_admission(advanced_decompensated_cirrhosis_icd10_codes)
-# Combined
-dataset.cov_bin_liver_cirrhosis = tmp_cov_bin_liver_cirrhosis_snomed | tmp_cov_bin_ascitis_drainage_snomed | tmp_cov_bin_liver_cirrhosis_hes
+## Advance decompensated liver cirrhosis, on or before baseline
+dataset.cov_bin_liver_cirrhosis = (
+    last_matching_event_clinical_snomed_before(advanced_decompensated_cirrhosis_snomed_codes + ascitic_drainage_snomed_codes, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(advanced_decompensated_cirrhosis_icd10_codes, baseline_date).exists_for_patient()
+)
 
 ## Use of the following medications in the last 14 days (drug-drug interaction with metformin)
-dataset.cov_bin_metfin_interaction = has_prior_prescription_14d(metformin_interaction_codes) 
-dataset.cov_date_metfin_interaction = has_prior_prescription_14d_date(metformin_interaction_codes)
+dataset.cov_bin_metfin_interaction = last_matching_med_dmd_between(metformin_interaction_codes, (baseline_date - days(14)), baseline_date).exists_for_patient()
+dataset.cov_date_metfin_interaction = last_matching_med_dmd_between(metformin_interaction_codes, (baseline_date - days(14)), baseline_date).date
 
 ## Prior Long COVID diagnosis, based on https://github.com/opensafely/long-covid/blob/main/analysis/codelists.py
-## All Long COVID-19 events in primary care
-primary_care_long_covid = clinical_events.where(
-    clinical_events.snomedct_code.is_in(
-        long_covid_diagnostic_codes
-        + long_covid_referral_codes
-        + long_covid_assessment_codes
-    )
-)
-# Any Long COVID code in primary care on or before baseline date
-dataset.cov_bin_long_covid = (
-    primary_care_long_covid.where(clinical_events.date.is_on_or_before(baseline_date))
-    .exists_for_patient()
-)
-dataset.cov_date_long_covid = (
-    primary_care_long_covid.where(clinical_events.date.is_on_or_before(baseline_date))
-    .sort_by(clinical_events.date)
-    .last_for_patient()
-    .date
-)
+dataset.cov_bin_long_covid = last_matching_event_clinical_snomed_before(long_covid_diagnostic_codes + long_covid_referral_codes + long_covid_assessment_codes, baseline_date).exists_for_patient()
+dataset.cov_date_long_covid = last_matching_event_clinical_snomed_before(long_covid_diagnostic_codes + long_covid_referral_codes + long_covid_assessment_codes, baseline_date).date
 
 
 
 #######################################################################################
 # Potential CONFOUNDER variables / Covariates for IPTW and IPCW
 #######################################################################################
-
 ## Smoking status at baseline
-tmp_most_recent_smoking_code = (
-    clinical_events.where(
-        clinical_events.ctv3_code.is_in(smoking_clear))
-        .where(clinical_events.date.is_on_or_before(baseline_date))
-        .sort_by(clinical_events.date)
-        .last_for_patient()
-        .ctv3_code
-)
-tmp_most_recent_smoking_cat = tmp_most_recent_smoking_code.to_category(smoking_clear)
-#dataset.tmp_most_recent_smoking_cat = tmp_most_recent_smoking_cat
-
-ever_smoked = (
-    clinical_events.where(
-        clinical_events.ctv3_code.is_in(ever_smoking)) ### used a different codelist with ONLY smoking codes
-        .where(clinical_events.date.is_on_or_before(baseline_date)) 
-        .exists_for_patient()
-)
-#dataset.ever_smoked = ever_smoked
-
-cov_cat_smoking_status = case(
+tmp_most_recent_smoking_cat = last_matching_event_clinical_ctv3_before(smoking_clear, baseline_date).ctv3_code.to_category(smoking_clear)
+tmp_ever_smoked = last_matching_event_clinical_ctv3_before(ever_smoking, baseline_date).exists_for_patient() # uses a different codelist with ONLY smoking codes
+dataset.cov_cat_smoking_status = case(
     when(tmp_most_recent_smoking_cat == "S").then("S"),
     when(tmp_most_recent_smoking_cat == "E").then("E"),
-    when((tmp_most_recent_smoking_cat == "N") & (ever_smoked == True)).then("E"),
+    when((tmp_most_recent_smoking_cat == "N") & (tmp_ever_smoked == True)).then("E"),
     when(tmp_most_recent_smoking_cat == "N").then("N"),
-    when((tmp_most_recent_smoking_cat == "M") & (ever_smoked == True)).then("E"),
+    when((tmp_most_recent_smoking_cat == "M") & (tmp_ever_smoked == True)).then("E"),
     when(tmp_most_recent_smoking_cat == "M").then("M"),
-    default = "M"
+    otherwise = "M"
 )
-dataset.cov_cat_smoking_status = cov_cat_smoking_status
 
-## Care home resident at baseline
+## Care home resident at baseline, like e.g. https://github.com/opensafely/opioids-covid-research/blob/main/analysis/define_dataset_table.py
 # Flag care home based on primis (patients in long-stay nursing and residential care)
-care_home_code = has_prior_event_snomed(carehome)
+tmp_care_home_code = last_matching_event_clinical_snomed_before(carehome, baseline_date).exists_for_patient()
 # Flag care home based on TPP
-care_home_tpp1 = addresses.for_patient_on(baseline_date).care_home_is_potential_match
-care_home_tpp2 = addresses.for_patient_on(baseline_date).care_home_requires_nursing
-care_home_tpp3 = addresses.for_patient_on(baseline_date).care_home_does_not_require_nursing
+tmp_care_home_tpp1 = addresses.for_patient_on(baseline_date).care_home_is_potential_match
+tmp_care_home_tpp2 = addresses.for_patient_on(baseline_date).care_home_requires_nursing
+tmp_care_home_tpp3 = addresses.for_patient_on(baseline_date).care_home_does_not_require_nursing
 # combine
 dataset.cov_bin_carehome_status = case(
-    when(care_home_code).then(True),
-    when(care_home_tpp1).then(True),
-    when(care_home_tpp2).then(True),
-    when(care_home_tpp3).then(True),
-    default=False
+    when(tmp_care_home_code).then(True),
+    when(tmp_care_home_tpp1).then(True),
+    when(tmp_care_home_tpp2).then(True),
+    when(tmp_care_home_tpp3).then(True),
+    otherwise = False
 )
 
 ## Obesity, on or before baseline
-# Primary care
-tmp_cov_bin_obesity_snomed = has_prior_event_snomed(bmi_obesity_snomed_clinical)
-# HES APC
-tmp_cov_bin_obesity_hes = has_prior_admission(bmi_obesity_icd10)
-# Combined
-dataset.cov_bin_obesity = tmp_cov_bin_obesity_snomed | tmp_cov_bin_obesity_hes
+dataset.cov_bin_obesity = (
+    last_matching_event_clinical_snomed_before(bmi_obesity_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(bmi_obesity_icd10, baseline_date).exists_for_patient()
+)
 
 ## Acute myocardial infarction, on or before baseline
-# Primary care
-tmp_cov_bin_ami_snomed = has_prior_event_snomed(ami_snomed_clinical)
-# HES APC
-tmp_cov_bin_ami_prior_hes = has_prior_admission(ami_prior_icd10)
-tmp_cov_bin_ami_hes = has_prior_admission(ami_icd10)
-# Combined
-dataset.cov_bin_ami = tmp_cov_bin_ami_snomed | tmp_cov_bin_ami_prior_hes | tmp_cov_bin_ami_hes
+dataset.cov_bin_ami = (
+    last_matching_event_clinical_snomed_before(ami_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(ami_prior_icd10 + ami_icd10, baseline_date).exists_for_patient()
+)
 
 ## All stroke, on or before baseline
-# Primary care
-tmp_cov_bin_stroke_isch_snomed = has_prior_event_snomed(stroke_isch_snomed_clinical)
-tmp_cov_bin_stroke_sah_hs_snomed = has_prior_event_snomed(stroke_sah_hs_snomed_clinical)
-# HES APC
-tmp_cov_bin_stroke_isch_hes = has_prior_admission(stroke_isch_icd10)
-tmp_cov_bin_stroke_sah_hs_hes = has_prior_admission(stroke_sah_hs_icd10)
-# Combined
-dataset.cov_bin_all_stroke = tmp_cov_bin_stroke_isch_snomed | tmp_cov_bin_stroke_sah_hs_snomed | tmp_cov_bin_stroke_isch_hes | tmp_cov_bin_stroke_sah_hs_hes
+dataset.cov_bin_all_stroke = (
+    last_matching_event_clinical_snomed_before(stroke_isch_snomed_clinical + stroke_sah_hs_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(stroke_isch_icd10 + stroke_sah_hs_icd10, baseline_date).exists_for_patient()
+)
 
 ## Other arterial embolism, on or before baseline
-# Primary care
-tmp_cov_bin_other_arterial_embolism_snomed = has_prior_event_snomed(other_arterial_embolism_snomed_clinical)
-# HES APC
-tmp_cov_bin_other_arterial_embolism_hes = has_prior_admission(ami_icd10)
-# Combined
-dataset.cov_bin_other_arterial_embolism = tmp_cov_bin_other_arterial_embolism_snomed | tmp_cov_bin_other_arterial_embolism_hes
+dataset.cov_bin_other_arterial_embolism = (
+    last_matching_event_clinical_snomed_before(other_arterial_embolism_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(other_arterial_embolism_icd10, baseline_date).exists_for_patient()
+)
 
 ## Venous thrombolism events, on or before baseline
-# Primary care
-# combine all VTE codelists
-all_vte_codes_snomed_clinical = clinical_events.where(
-    clinical_events.snomedct_code.is_in(
-        portal_vein_thrombosis_snomed_clinical
+dataset.cov_bin_vte = (
+    last_matching_event_clinical_snomed_before(portal_vein_thrombosis_snomed_clinical
         + dvt_dvt_snomed_clinical
         + dvt_icvt_snomed_clinical
         + dvt_pregnancy_snomed_clinical
         + other_dvt_snomed_clinical
-        + pe_snomed_clinical
-    )
-)
-tmp_cov_bin_vte_snomed = (
-    all_vte_codes_snomed_clinical.where(clinical_events.date.is_on_or_before(baseline_date))
-    #.sort_by(clinical_events.date) # this line of code needed?
-    .exists_for_patient()
-)
-# HES APC
-all_vte_codes_icd10 = hospital_admissions.where(
-    hospital_admissions.all_diagnoses.is_in(
-        portal_vein_thrombosis_icd10
+        + pe_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(portal_vein_thrombosis_icd10
         + dvt_dvt_icd10
         + dvt_icvt_icd10
         + dvt_pregnancy_icd10
         + other_dvt_icd10
         + icvt_pregnancy_icd10
-        + pe_icd10
-    )
+        + pe_icd10, baseline_date).exists_for_patient()
 )
-tmp_cov_bin_vte_hes = (
-    all_vte_codes_icd10.where(hospital_admissions.admission_date.is_on_or_before(baseline_date))
-    #.sort_by(hospital_admissions.admission_date)
-    .exists_for_patient()
-)
-# Combined
-dataset.cov_bin_vte = tmp_cov_bin_vte_snomed | tmp_cov_bin_vte_hes
 
 ## Heart failure, on or before baseline
-# Primary care
-tmp_cov_bin_hf_snomed = has_prior_event_snomed(hf_snomed_clinical)
-# HES APC
-tmp_cov_bin_hf_hes = has_prior_admission(hf_icd10)
-# Combined
-dataset.cov_bin_hf = tmp_cov_bin_hf_snomed | tmp_cov_bin_hf_hes
+dataset.cov_bin_hf = (
+    last_matching_event_clinical_snomed_before(hf_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(hf_icd10, baseline_date).exists_for_patient()
+)
 
 ## Angina, on or before baseline
-# Primary care
-tmp_cov_bin_angina_snomed = has_prior_event_snomed(angina_snomed_clinical)
-# HES APC
-tmp_cov_bin_angina_hes = has_prior_admission(angina_icd10)
-# Combined
-dataset.cov_bin_angina = tmp_cov_bin_angina_snomed | tmp_cov_bin_angina_hes
+dataset.cov_bin_angina = (
+    last_matching_event_clinical_snomed_before(angina_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(angina_icd10, baseline_date).exists_for_patient()
+)
 
 ## Dementia, on or before baseline
-# Primary care
-tmp_cov_bin_dementia_snomed = has_prior_event_snomed(dementia_snomed_clinical)
-tmp_cov_bin_dementia_vascular_snomed = has_prior_event_snomed(dementia_vascular_snomed_clinical)
-# HES APC
-tmp_cov_bin_dementia_hes = has_prior_admission(dementia_icd10)
-tmp_cov_bin_dementia_vascular_hes = has_prior_admission(dementia_vascular_icd10)
-# Combined
-dataset.cov_bin_dementia = tmp_cov_bin_dementia_snomed | tmp_cov_bin_dementia_vascular_snomed | tmp_cov_bin_dementia_hes | tmp_cov_bin_dementia_vascular_hes
+dataset.cov_bin_dementia = (
+    last_matching_event_clinical_snomed_before(dementia_snomed_clinical + dementia_vascular_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(dementia_icd10 + dementia_vascular_icd10, baseline_date).exists_for_patient()
+)
 
 ## Cancer, on or before baseline
-# Primary care
-tmp_cov_bin_cancer_snomed = has_prior_event_snomed(cancer_snomed_clinical)
-# HES APC
-tmp_cov_bin_cancer_hes = has_prior_admission(cancer_icd10)
-# Combined
-dataset.cov_bin_cancer = tmp_cov_bin_cancer_snomed | tmp_cov_bin_cancer_hes
+dataset.cov_bin_cancer = (
+    last_matching_event_clinical_snomed_before(cancer_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(cancer_icd10, baseline_date).exists_for_patient()
+)
 
 ## Hypertension, on or before baseline
-# Primary care
-tmp_cov_bin_hypertension_snomed = has_prior_event_snomed(hypertension_snomed_clinical)
-# HES APC
-tmp_cov_bin_hypertension_hes = has_prior_admission(hypertension_icd10)
-# DMD
-tmp_cov_bin_hypertension_drugs_dmd = (
-    medications.where(
-        medications.dmd_code.is_in(hypertension_drugs_dmd)) 
-        .where(medications.date.is_on_or_before(baseline_date))
-        .exists_for_patient()
+dataset.cov_bin_hypertension = (
+    last_matching_event_clinical_snomed_before(hypertension_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(hypertension_icd10, baseline_date).exists_for_patient() | 
+    last_matching_med_dmd_before(hypertension_drugs_dmd, baseline_date).exists_for_patient() # not sure this is a good idea..
 )
-# Combined
-dataset.cov_bin_hypertension = tmp_cov_bin_hypertension_snomed | tmp_cov_bin_hypertension_hes | tmp_cov_bin_hypertension_drugs_dmd
 
 ## Depression, on or before baseline
-# Primary care
-tmp_cov_bin_depression_snomed = has_prior_event_snomed(depression_snomed_clinical)
-# HES APC
-tmp_cov_bin_depression_icd10 = has_prior_admission(depression_icd10)
-# Combined
-dataset.cov_bin_depression = tmp_cov_bin_depression_snomed | tmp_cov_bin_depression_icd10
+dataset.cov_bin_depression = (
+    last_matching_event_clinical_snomed_before(depression_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(depression_icd10, baseline_date).exists_for_patient()
+)
 
 ## Chronic obstructive pulmonary disease, on or before baseline
-# Primary care
-tmp_cov_bin_chronic_obstructive_pulmonary_disease_snomed = has_prior_event_snomed(copd_snomed_clinical)
-# HES APC
-tmp_cov_bin_chronic_obstructive_pulmonary_disease_hes = has_prior_admission(copd_icd10)
-# Combined
-dataset.cov_bin_copd = tmp_cov_bin_chronic_obstructive_pulmonary_disease_snomed | tmp_cov_bin_chronic_obstructive_pulmonary_disease_hes
+dataset.cov_bin_copd = (
+    last_matching_event_clinical_snomed_before(copd_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(copd_icd10, baseline_date).exists_for_patient()
+)
 
 ## Liver disease, on or before baseline
-# Primary care
-tmp_cov_bin_liver_disease_snomed = has_prior_event_snomed(liver_disease_snomed_clinical)
-# HES APC
-tmp_cov_bin_liver_disease_hes = has_prior_admission(liver_disease_icd10)
-# Combined
-dataset.cov_bin_liver_disease = tmp_cov_bin_liver_disease_snomed | tmp_cov_bin_liver_disease_hes
+dataset.cov_bin_liver_disease = (
+    last_matching_event_clinical_snomed_before(liver_disease_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(liver_disease_icd10, baseline_date).exists_for_patient()
+)
 
-## Chronic kidney disease, on or before baseline 
-# Primary care
-tmp_cov_bin_chronic_kidney_disease_snomed = has_prior_event_snomed(ckd_snomed_clinical) 
-# HES APC
-tmp_cov_bin_chronic_kidney_disease_hes = has_prior_admission(ckd_icd10)
-# Combined
-dataset.cov_bin_chronic_kidney_disease = tmp_cov_bin_chronic_kidney_disease_snomed | tmp_cov_bin_chronic_kidney_disease_hes
+## Chronic kidney disease, on or before baseline
+dataset.cov_bin_chronic_kidney_disease = (
+    last_matching_event_clinical_snomed_before(ckd_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(ckd_icd10, baseline_date).exists_for_patient()
+)
 
 ## Gestational diabetes
-# Primary care
-tmp_cov_bin_gestationaldm_ctv3 = has_prior_event_ctv3(diabetes_gestational_ctv3_clinical)
-# HES APC
-tmp_cov_bin_gestationaldm_hes = has_prior_admission(gestationaldm_icd10)
-# Combined
-dataset.cov_bin_gestationaldm = tmp_cov_bin_gestationaldm_ctv3 | tmp_cov_bin_gestationaldm_hes
+dataset.cov_bin_gestationaldm = (
+    last_matching_event_clinical_ctv3_before(diabetes_gestational_ctv3_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(gestationaldm_icd10, baseline_date).exists_for_patient()
+)
 
 ## PCOS
-# Primary care
-tmp_cov_bin_pcos_snomed = has_prior_event_snomed(pcos_snomed_clinical)
-# HES APC
-tmp_cov_bin_pcos_hes = has_prior_admission(pcos_icd10)
-# Combined
-dataset.cov_bin_pcos = tmp_cov_bin_pcos_snomed | tmp_cov_bin_pcos_hes
+dataset.cov_bin_pcos = (
+    last_matching_event_clinical_snomed_before(pcos_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(pcos_icd10, baseline_date).exists_for_patient()
+)
 
 ## Type 1 Diabetes
-# Primary care
-tmp_cov_bin_t1dm_ctv3 = has_prior_event_ctv3(diabetes_type1_ctv3_clinical)
-# HES APC
-tmp_cov_bin_t1dm_hes = has_prior_admission(diabetes_type1_icd10)
-# Combined
-dataset.cov_bin_t1dm = tmp_cov_bin_t1dm_ctv3 | tmp_cov_bin_t1dm_hes
+dataset.cov_bin_t1dm = (
+    last_matching_event_clinical_ctv3_before(diabetes_type1_ctv3_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(diabetes_type1_icd10, baseline_date).exists_for_patient()
+)
 
 ## Diabetes complications (foot, retino, neuro, nephro)
-# Primary care
-tmp_cov_bin_diabetescomp_snomed = has_prior_event_snomed(diabetescomp_snomed_clinical)
-# HES APC
-tmp_cov_bin_diabetescomp_hes = has_prior_admission(diabetescomp_icd10)
-# Combined
-dataset.cov_bin_diabetescomp = tmp_cov_bin_diabetescomp_snomed | tmp_cov_bin_diabetescomp_hes
+dataset.cov_bin_diabetescomp = (
+    last_matching_event_clinical_snomed_before(diabetescomp_snomed_clinical, baseline_date).exists_for_patient() |
+    last_matching_event_apc_before(diabetescomp_icd10, baseline_date).exists_for_patient()
+)
 
 ### Any HbA1c measurement
-# Primary care
-dataset.cov_bin_hba1c_measurement = has_prior_event_snomed(hba1c_measurement_snomed)
+dataset.cov_bin_hba1c_measurement = last_matching_event_clinical_snomed_before(hba1c_measurement_snomed, baseline_date).exists_for_patient()
 
 ### Any OGTT done
-# Primary care
-dataset.cov_bin_ogtt_measurement = has_prior_event_snomed(ogtt_measurement_snomed)
+dataset.cov_bin_ogtt_measurement = last_matching_event_clinical_snomed_before(ogtt_measurement_snomed, baseline_date).exists_for_patient()
 
 ### Covid-19 vaccination history
 dataset.cov_count_covid_vaccines = (
@@ -910,8 +548,6 @@ dataset.cov_date_recent_covid_vaccines = (
   .date
 )
 
-
-
 ## BMI, most recent value, within previous 2 years
 bmi_measurement = most_recent_bmi(
     where=clinical_events.date.is_after(baseline_date - days(2 * 366)),
@@ -924,19 +560,17 @@ dataset.cov_cat_bmi_groups = case(
     when((cov_num_bmi >= 18.5) & (cov_num_bmi < 25.0)).then("Healthy weight (18.5-24.9)"),
     when((cov_num_bmi >= 25.0) & (cov_num_bmi < 30.0)).then("Overweight (25-29.9)"),
     when((cov_num_bmi >= 30.0) & (cov_num_bmi < 70.0)).then("Obese (>30)"), # Set maximum to avoid any impossibly extreme values being classified as obese
-    default="missing", 
+    otherwise = "missing", 
 )
 
 ## HbA1c, most recent value, within previous 2 years
-dataset.cov_num_hba1c_mmol_mol = recent_value_2y_ctv3(hba1c_new_codes)
+dataset.cov_num_hba1c_mmol_mol = last_matching_event_clinical_ctv3_between(hba1c_new_codes, baseline_date - days(2*366), baseline_date).numeric_value # Calculated from 1 year = 365.25 days, taking into account leap years. 
 
 ## Total Cholesterol, most recent value, within previous 2 years
-dataset.tmp_cov_num_cholesterol = recent_value_2y_snomed(cholesterol_snomed)
+dataset.tmp_cov_num_cholesterol = last_matching_event_clinical_snomed_between(cholesterol_snomed, baseline_date - days(2*366), baseline_date).numeric_value # Calculated from 1 year = 365.25 days, taking into account leap years. 
 
 ## HDL Cholesterol, most recent value, within previous 2 years
-dataset.tmp_cov_num_hdl_cholesterol = recent_value_2y_snomed(hdl_cholesterol_snomed)
-
-
+dataset.tmp_cov_num_hdl_cholesterol = last_matching_event_clinical_snomed_between(hdl_cholesterol_snomed, baseline_date - days(2*366), baseline_date).numeric_value # Calculated from 1 year = 365.25 days, taking into account leap years.
 
 ## Number of consultations in year prior to pandemic (2019)
 # dataset.cov_num_consultation_rate = (
@@ -952,8 +586,6 @@ dataset.cov_bin_healthcare_worker = (
         occupation_on_covid_vaccine_record.is_healthcare_worker == True)
         .exists_for_patient()
 )
-
-
 
 
 #######################################################################################
@@ -992,6 +624,28 @@ dataset.exp_bin_7d_metfin = (
 
 # Practice deregistration date
 dataset.out_date_dereg = registered.end_date
+
+# Deregistration date- no support from any practices ---------------------------------------------
+
+    ## the latest deregistration_date
+tmp_deregistration_date = (
+    practice_registrations.where(
+        practice_registrations.end_date.is_not_null()
+        )
+        .sort_by(practice_registrations.end_date)
+        .last_for_patient()
+        .end_date
+)
+    ## whether the patient has no support from any practices 
+registration = (practice_registrations.where(
+    practice_registrations.end_date.is_null()
+    ).exists_for_patient()
+)
+
+deregistration_date = case(
+    when(registration == False).then(tmp_deregistration_date)
+)
+
 
 # First covid-19 related hospital admission, after baseline date
 out_date_covid19_hes = (
