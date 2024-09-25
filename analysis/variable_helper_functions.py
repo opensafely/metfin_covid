@@ -11,17 +11,19 @@ from ehrql.tables.tpp import (
     ons_deaths,
     emergency_care_attendances
 )
-
+from ehrql import days # for BMI function
+from ehrql.codes import CTV3Code # for BMI function
 
 ### HELPER functions, based on https://github.com/opensafely/comparative-booster-spring2023/blob/main/analysis/dataset_definition.py
 import operator
 from functools import reduce
 def any_of(conditions):
     return reduce(operator.or_, conditions)
-
+from ehrql.tables import tpp as schema
 
 ### ANY HISTORY of ... (including baseline_date)
 ## In PRIMARY CARE
+# CTV3/Read
 def last_matching_event_clinical_ctv3_before(codelist, baseline_date, where=True):
     return(
         clinical_events.where(where)
@@ -30,6 +32,7 @@ def last_matching_event_clinical_ctv3_before(codelist, baseline_date, where=True
         .sort_by(clinical_events.date)
         .last_for_patient()
     )
+# Snomed
 def last_matching_event_clinical_snomed_before(codelist, baseline_date, where=True):
     return(
         clinical_events.where(where)
@@ -38,6 +41,7 @@ def last_matching_event_clinical_snomed_before(codelist, baseline_date, where=Tr
         .sort_by(clinical_events.date)
         .last_for_patient()
     )
+# Medication
 def last_matching_med_dmd_before(codelist, baseline_date, where=True):
     return(
         medications.where(where)
@@ -96,6 +100,7 @@ def matching_death_before(codelist, baseline_date, where=True):
 
 ### HISTORY of ... in past ... days/months/years (including baseline_date)
 ## In PRIMARY CARE
+# CTV3/Read
 def last_matching_event_clinical_ctv3_between(codelist, start_date, baseline_date, where=True):
     return(
         clinical_events.where(where)
@@ -104,6 +109,7 @@ def last_matching_event_clinical_ctv3_between(codelist, start_date, baseline_dat
         .sort_by(clinical_events.date)
         .last_for_patient()
     )
+# Snomed
 def last_matching_event_clinical_snomed_between(codelist, start_date, baseline_date, where=True):
     return(
         clinical_events.where(where)
@@ -112,6 +118,7 @@ def last_matching_event_clinical_snomed_between(codelist, start_date, baseline_d
         .sort_by(clinical_events.date)
         .last_for_patient()
     )
+# Medication
 def last_matching_med_dmd_between(codelist, start_date, baseline_date, where=True):
     return(
         medications.where(where)
@@ -142,7 +149,7 @@ def last_matching_event_opa_between(codelist, start_date, baseline_date, where=T
     )
 
 ## In EMERGENCY CARE
-def last_matching_event_ec_snomed_before(codelist, start_date, baseline_date, where=True):
+def last_matching_event_ec_snomed_between(codelist, start_date, baseline_date, where=True):
     conditions = [
         getattr(emergency_care_attendances, column_name).is_in(codelist)
         for column_name in ([f"diagnosis_{i:02d}" for i in range(1, 25)])
@@ -158,6 +165,7 @@ def last_matching_event_ec_snomed_before(codelist, start_date, baseline_date, wh
 
 ### COUNT all prior events (including baseline_date)
 ## In PRIMARY CARE
+# CTV3/Read
 def count_matching_event_clinical_ctv3_before(codelist, baseline_date, where=True):
     return(
         clinical_events.where(where)
@@ -165,6 +173,7 @@ def count_matching_event_clinical_ctv3_before(codelist, baseline_date, where=Tru
         .where(clinical_events.date.is_on_or_before(baseline_date))
         .count_for_patient()
     )
+# Snomed
 def count_matching_event_clinical_snomed_before(codelist, baseline_date, where=True):
     return(
         clinical_events.where(where)
@@ -194,6 +203,7 @@ def count_matching_event_opa_before(codelist, baseline_date, where=True):
 
 ### Any future events (including baseline_date and study end_date)
 ## In PRIMARY CARE
+# CTV3/Read
 def first_matching_event_clinical_ctv3_between(codelist, baseline_date, end_date, where=True):
     return(
         clinical_events.where(where)
@@ -202,6 +212,7 @@ def first_matching_event_clinical_ctv3_between(codelist, baseline_date, end_date
         .sort_by(clinical_events.date)
         .first_for_patient()
     )
+# Snomed
 def first_matching_event_clinical_snomed_between(codelist, baseline_date, end_date, where=True):
     return(
         clinical_events.where(where)
@@ -210,6 +221,7 @@ def first_matching_event_clinical_snomed_between(codelist, baseline_date, end_da
         .sort_by(clinical_events.date)
         .first_for_patient()
     )
+# Medication
 def first_matching_med_dmd_between(codelist, baseline_date, end_date, where=True):
     return(
         medications.where(where)
@@ -263,4 +275,32 @@ def matching_death_between(codelist, baseline_date, end_date, where=True):
         ons_deaths.where()
         .where(any_of(conditions))
         .where(ons_deaths.arrival_date.is_on_or_between(baseline_date, end_date))
+    )
+
+### Causes of DEATH without any date restrictions
+def cause_of_death_matches(codelist):
+    conditions = [
+        getattr(ons_deaths, column_name).is_in(codelist)
+        for column_name in (["underlying_cause_of_death"]+[f"cause_of_death_{i:02d}" for i in range(1, 16)])
+    ]
+    return any_of(conditions)
+
+
+### BMI calculation
+def most_recent_bmi(*, minimum_age_at_measurement, where=True):
+    clinical_events = schema.clinical_events
+    age_threshold = schema.patients.date_of_birth + days(
+        # This is obviously inexact but, given that the dates of birth are rounded to
+        # the first of the month anyway, there's no point trying to be more accurate
+        int(365.25 * minimum_age_at_measurement)
+    )
+    return (
+        # This captures just explicitly recorded BMI observations rather than attempting
+        # to calculate it from height and weight measurements. Investigation has shown
+        # this to have no real benefit it terms of coverage or accuracy.
+        clinical_events.where(clinical_events.ctv3_code == CTV3Code("22K.."))
+        .where(clinical_events.date >= age_threshold)
+        .where(where)
+        .sort_by(clinical_events.date)
+        .last_for_patient()
     )
