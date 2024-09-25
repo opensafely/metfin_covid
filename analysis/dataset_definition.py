@@ -5,11 +5,9 @@
 ## ehrQL functions
 from ehrql import (
     case,
-    codelist_from_csv,
     create_dataset,
     days,
     when,
-    weeks,
     minimum_of,
     maximum_of
 )
@@ -19,17 +17,13 @@ from ehrql.tables.tpp import (
     addresses,
     clinical_events,
     apcs,
-    opa_diag,
     medications,
     patients,
     practice_registrations,
-    appointments,
     occupation_on_covid_vaccine_record,
     ons_deaths,
     sgss_covid_all_tests,
-    ethnicity_from_sus,
-    vaccinations, 
-    emergency_care_attendances
+    vaccinations,
 )
 
 ## All codelists from codelists.py
