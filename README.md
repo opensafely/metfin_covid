@@ -1,6 +1,6 @@
 # Implications of metformin for (Long) COVID
 
-This is an old repo, replace by this one: https://github.com/opensafely/metformin_covid !
+This is an old repo, superseded by this one: https://github.com/opensafely/metformin_covid !
 
 [View on OpenSAFELY](https://jobs.opensafely.org/repo/https%253A%252F%252Fgithub.com%252Fopensafely%252Fmetfin_covid)
 
